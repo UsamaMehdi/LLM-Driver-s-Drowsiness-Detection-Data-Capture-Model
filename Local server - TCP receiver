@@ -1,0 +1,70 @@
+### tcp_receiver.py (ROS 2 Version). A local server to test whether or not data is transfered.
+
+#!/usr/bin/env python3
+import socket
+import json
+import asyncio
+import websockets
+import threading
+
+TCP_HOST = '127.0.0.1'
+TCP_PORT = 5000
+WS_HOST = 'localhost'
+WS_PORT = 6789
+
+connected_clients = set()
+
+async def websocket_handler(websocket, path):
+    connected_clients.add(websocket)
+    print(f"[WS] Client connected")
+    try:
+        await websocket.wait_closed()
+    finally:
+        connected_clients.remove(websocket)
+        print(f"[WS] Client disconnected")
+
+def start_websocket_server():
+    print(f"[INFO] Starting WebSocket server at ws://{WS_HOST}:{WS_PORT}")
+    asyncio.set_event_loop(asyncio.new_event_loop())
+    start_server = websockets.serve(websocket_handler, WS_HOST, WS_PORT)
+    asyncio.get_event_loop().run_until_complete(start_server)
+    asyncio.get_event_loop().run_forever()
+
+def broadcast_to_websockets(message):
+    asyncio.run(broadcast_async(message))
+
+async def broadcast_async(message):
+    if connected_clients:
+        await asyncio.gather(*(client.send(message) for client in connected_clients))
+
+def start_tcp_server():
+    print(f"[INFO] Starting TCP Server at {TCP_HOST}:{TCP_PORT}")
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind((TCP_HOST, TCP_PORT))
+        s.listen()
+        print("[INFO] Waiting for TCP connection...")
+        conn, addr = s.accept()
+        with conn:
+            print(f"[TCP] Connected by {addr}")
+            buffer = ""
+            while True:
+                try:
+                    data = conn.recv(1024).decode('utf-8')
+                    if not data:
+                        break
+                    buffer += data
+                    while '\n' in buffer:
+                        line, buffer = buffer.split('\n', 1)
+                        try:
+                            json_data = json.loads(line)
+                            print("[RECEIVED JSON]:", json.dumps(json_data, indent=4))
+                            broadcast_to_websockets(json.dumps(json_data))
+                        except json.JSONDecodeError:
+                            print("[WARNING] Could not decode line as JSON:", line)
+                except Exception as e:
+                    print(f"[ERROR] Exception in TCP receiving: {e}")
+                    break
+
+if __name__ == "__main__":
+    threading.Thread(target=start_websocket_server, daemon=True).start()
+    start_tcp_server()
