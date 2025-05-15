@@ -1,0 +1,85 @@
+# ROS 2 Implementation of Data Capture Model and TCP Receiver
+
+#Data_publisher.py
+
+#!/usr/bin/env python3
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import String
+import json
+import os
+import time
+import socket
+
+MAX_ITERATIONS = 10
+
+# Remote feature extractor server IP and port (testing on the same machine, later change to target PC or wherever the Feautre extractor will operate)
+REMOTE_IP = '127.0.0.1'  # My PC
+REMOTE_PORT = 5000       # Sample Port
+
+class DataPublisher(Node):
+    def __init__(self):
+        super().__init__('data_publisher')
+        self.publisher_ = self.create_publisher(String, 'carla_data', 10)
+        self.timer = self.create_timer(1.0, self.publish_data)
+
+        # Corrected paths for Carla Data
+        self.carla_data_path = '/root/ros_data_capture_ws/src/data_capture/dataset/carla_data'
+        self.steer_values_file = os.path.join(self.carla_data_path, 'SteerValues', 'steer_values.txt')
+        self.images_folder = os.path.join(self.carla_data_path, 'Images')
+
+        # Corrected paths for Drowsiness Data
+        self.drowsiness_data_path = os.path.join(self.carla_data_path, 'D3SVideoFrames')
+
+        # Read data
+        with open(self.steer_values_file, 'r') as f:
+            self.steer_values = f.readlines()
+
+        self.images = [img for img in os.listdir(self.images_folder) if img.endswith(('.jpg', '.png'))]
+        self.drowsiness_images = [img for img in os.listdir(self.drowsiness_data_path) if img.endswith(('.jpg', '.png'))]
+
+        self.index = 0
+
+        # Initialize TCP socket
+        self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            self.client_socket.connect((REMOTE_IP, REMOTE_PORT))
+            self.get_logger().info(f"Connected to remote feature extractor at {REMOTE_IP}:{REMOTE_PORT}")
+        except Exception as e:
+            self.get_logger().error(f"Socket connection failed: {e}")
+
+    def publish_data(self):
+        if self.index >= len(self.steer_values) or self.index >= len(self.images) or self.index >= len(self.drowsiness_images):
+            self.index = 0
+
+        steering_angle = float(self.steer_values[self.index].strip())
+        carla_image_path = os.path.join(self.images_folder, self.images[self.index])
+        drowsiness_image_path = os.path.join(self.drowsiness_data_path, self.drowsiness_images[self.index])
+
+        data = {
+            'steering_angle': steering_angle,
+            'carla_image_path': carla_image_path,
+            'drowsiness_image_path': drowsiness_image_path,
+            'timestamp': time.time()
+        }
+
+        json_data = json.dumps(data)
+        self.get_logger().info(json_data)
+        self.publisher_.publish(String(data=json_data))
+
+        try:
+            self.client_socket.sendall((json_data + '\n').encode('utf-8'))
+        except Exception as e:
+            self.get_logger().error(f"Error sending data: {e}")
+
+        self.index += 1
+
+def main(args=None):
+    rclpy.init(args=args)
+    data_publisher = DataPublisher()
+    rclpy.spin(data_publisher)
+    data_publisher.destroy_node()
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
