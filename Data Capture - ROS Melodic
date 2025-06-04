@@ -1,0 +1,92 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+import rospy
+import carla
+import math
+import json
+import os
+from std_msgs.msg import String
+
+# Initialize Carla client
+client = carla.Client("localhost", 2000)
+client.set_timeout(10.0)
+world = client.get_world()
+
+def get_signed_lateral_offset(vehicle_location):
+    map = world.get_map()
+    waypoint = map.get_waypoint(vehicle_location, project_to_road=True)
+    lane_center = waypoint.transform.location
+    lane_forward = waypoint.transform.get_forward_vector()
+
+    # Vector from lane center to vehicle
+    dx = vehicle_location.x - lane_center.x
+    dy = vehicle_location.y - lane_center.y
+
+    # Normalize lane forward vector (2D)
+    fx, fy = lane_forward.x, lane_forward.y
+    mag_f = math.sqrt(fx**2 + fy**2)
+    fx /= mag_f
+    fy /= mag_f
+
+    # Cross product to determine direction
+    cross = fx * dy - fy * dx
+
+    # Distance (magnitude)
+    distance = math.sqrt(dx**2 + dy**2)
+
+    # Signed distance
+    signed_offset = distance if cross > 0 else -distance
+    return lane_center, signed_offset
+
+def save_data_to_json(data, filename="lane_log.json"):
+    if not os.path.exists(filename):
+        with open(filename, "w") as f:
+            json.dump([data], f, indent=4)
+    else:
+        with open(filename, "r+") as f:
+            try:
+                existing = json.load(f)
+            except json.JSONDecodeError:
+                existing = []
+            existing.append(data)
+            f.seek(0)
+            json.dump(existing, f, indent=4)
+
+def main():
+    rospy.init_node("lane_offset_logger", anonymous=True)
+    rate = rospy.Rate(2)  # 2 Hz
+
+    try:
+        vehicle = world.get_actors().filter("vehicle.*")[0]
+        rospy.loginfo("Connected to vehicle: %s", vehicle.type_id)
+    except IndexError:
+        rospy.logerr("No vehicle found in the simulation.")
+        return
+
+    while not rospy.is_shutdown():
+        transform = vehicle.get_transform()
+        location = transform.location
+        control = vehicle.get_control()
+        steering_angle = control.steer
+
+        lane_center, lateral_offset = get_signed_lateral_offset(location)
+
+        data = {
+            "vehicle_position": {"x": round(location.x, 4), "y": round(location.y, 4), "z": round(location.z, 2)},
+            "lane_center": {"x": round(lane_center.x, 4), "y": round(lane_center.y, 4), "z": round(lane_center.z, 2)},
+            "steering_angle": round(steering_angle, 4),
+            "lateral_offset": round(lateral_offset, 4),
+            "direction": "left" if lateral_offset > 0 else "right" if lateral_offset < 0 else "center"
+        }
+
+        rospy.loginfo(json.dumps(data, indent=2))
+        save_data_to_json(data)
+
+        rate.sleep()
+
+if __name__ == "__main__":
+    try:
+        main()
+    except rospy.ROSInterruptException:
+        pass
