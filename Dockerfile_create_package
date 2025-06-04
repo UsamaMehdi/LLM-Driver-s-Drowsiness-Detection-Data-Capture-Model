@@ -1,0 +1,19 @@
+FROM osrf/ros:humble-desktop
+
+# Customizable environment variables
+ENV PACKAGE_NAME=data_capture
+ENV NODE_NAME=data_capture_node
+
+
+# ROS2 specific variables
+ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+
+RUN sudo apt-get update && sudo apt-get upgrade -y
+RUN sudo apt-get install -y \
+    ros-humble-rmw-cyclonedds-cpp && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /opt/ros2_ws/src
+WORKDIR /opt/ros2_ws/src
+
+CMD ["bash", "-c", "ros2 pkg create --build-type ament_python --node-name $NODE_NAME $PACKAGE_NAME && chown -R $UID:$GID /opt/ros2_ws/src"]
