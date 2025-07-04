@@ -1,84 +1,100 @@
-# ROS 2 Implementation of Data Capture Model and TCP Receiver
-
-#Data_publisher.py
+#ROS2-Humble: Data Publisher
 
 #!/usr/bin/env python3
+
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import String
+import carla
+import math
 import json
 import os
-import time
-import socket
-
-MAX_ITERATIONS = 10
-
-# Remote feature extractor server IP and port (testing on the same machine, later change to target PC or wherever the Feautre extractor will operate)
-REMOTE_IP = '127.0.0.1'  # My PC
-REMOTE_PORT = 5000       # Sample Port
 
 class DataPublisher(Node):
     def __init__(self):
         super().__init__('data_publisher')
-        self.publisher_ = self.create_publisher(String, 'carla_data', 10)
-        self.timer = self.create_timer(1.0, self.publish_data)
+        self.get_logger().info('Initializing Data Publisher...')
 
-        # Corrected paths for Carla Data
-        self.carla_data_path = '/root/ros_data_capture_ws/src/data_capture/dataset/carla_data'
-        self.steer_values_file = os.path.join(self.carla_data_path, 'SteerValues', 'steer_values.txt')
-        self.images_folder = os.path.join(self.carla_data_path, 'Images')
+        # Connect to CARLA server
+        self.client = carla.Client('localhost', 2000)
+        self.client.set_timeout(10.0)
+        self.world = self.client.get_world()
 
-        # Corrected paths for Drowsiness Data
-        self.drowsiness_data_path = os.path.join(self.carla_data_path, 'D3SVideoFrames')
+        blueprint_library = self.world.get_blueprint_library()
+        self.vehicle = None
 
-        # Read data
-        with open(self.steer_values_file, 'r') as f:
-            self.steer_values = f.readlines()
+        for actor in self.world.get_actors():
+            if 'vehicle' in actor.type_id:
+                self.vehicle = actor
+                break
 
-        self.images = [img for img in os.listdir(self.images_folder) if img.endswith(('.jpg', '.png'))]
-        self.drowsiness_images = [img for img in os.listdir(self.drowsiness_data_path) if img.endswith(('.jpg', '.png'))]
+        if self.vehicle is None:
+            self.get_logger().error("No vehicle found in simulation!")
+            return
+        else:
+            self.get_logger().info(f"Connected to vehicle: {self.vehicle.type_id}")
 
-        self.index = 0
+        self.map = self.world.get_map()
 
-        # Initialize TCP socket
-        self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # JSON logging
+        self.data_log = []
+        self.json_file_path = os.path.expanduser('~/Documents/carla_data_log.json')
+
+        # Timer to call publisher_callback at 20 Hz
+        self.create_timer(0.05, self.publisher_callback)
+
+    def publisher_callback(self):
         try:
-            self.client_socket.connect((REMOTE_IP, REMOTE_PORT))
-            self.get_logger().info(f"Connected to remote feature extractor at {REMOTE_IP}:{REMOTE_PORT}")
+            # Get vehicle transform and steering
+            transform = self.vehicle.get_transform()
+            location = transform.location
+            vehicle_pos = (location.x, location.y)
+
+            control = self.vehicle.get_control()
+            steering_angle = control.steer  # -1.0 (full left) to +1.0 (full right)
+
+            # Get lane center waypoint
+            waypoint = self.map.get_waypoint(location, project_to_road=True)
+            lane_pos = waypoint.transform.location
+            lane_center = (lane_pos.x, lane_pos.y)
+
+            # Calculate lateral offset
+            dx = vehicle_pos[0] - lane_center[0]
+            dy = vehicle_pos[1] - lane_center[1]
+            lateral_offset = math.sqrt(dx**2 + dy**2)
+
+            # Determine side and apply sign
+            if dx < -0.1:
+                lateral_offset *= -1
+                direction = 'left'
+            elif dx > 0.1:
+                direction = 'right'
+            else:
+                lateral_offset = 0.0
+                direction = 'center'
+
+            # Create log entry
+            log_entry = {
+                'steering_angle': round(steering_angle, 3),
+                'lateral_offset_m': round(lateral_offset, 3),
+                'direction': direction
+            }
+
+            self.get_logger().info(str(log_entry))
+            self.data_log.append(log_entry)
+
+            # Save every 10 entries
+            if len(self.data_log) % 10 == 0:
+                with open(self.json_file_path, 'w') as f:
+                    json.dump(self.data_log, f, indent=2)
+
         except Exception as e:
-            self.get_logger().error(f"Socket connection failed: {e}")
-
-    def publish_data(self):
-        if self.index >= len(self.steer_values) or self.index >= len(self.images) or self.index >= len(self.drowsiness_images):
-            self.index = 0
-
-        steering_angle = float(self.steer_values[self.index].strip())
-        carla_image_path = os.path.join(self.images_folder, self.images[self.index])
-        drowsiness_image_path = os.path.join(self.drowsiness_data_path, self.drowsiness_images[self.index])
-
-        data = {
-            'steering_angle': steering_angle,
-            'carla_image_path': carla_image_path,
-            'drowsiness_image_path': drowsiness_image_path,
-            'timestamp': time.time()
-        }
-
-        json_data = json.dumps(data)
-        self.get_logger().info(json_data)
-        self.publisher_.publish(String(data=json_data))
-
-        try:
-            self.client_socket.sendall((json_data + '\n').encode('utf-8'))
-        except Exception as e:
-            self.get_logger().error(f"Error sending data: {e}")
-
-        self.index += 1
+            self.get_logger().error(f"Error: {e}")
 
 def main(args=None):
     rclpy.init(args=args)
-    data_publisher = DataPublisher()
-    rclpy.spin(data_publisher)
-    data_publisher.destroy_node()
+    node = DataPublisher()
+    rclpy.spin(node)
+    node.destroy_node()
     rclpy.shutdown()
 
 if __name__ == '__main__':
