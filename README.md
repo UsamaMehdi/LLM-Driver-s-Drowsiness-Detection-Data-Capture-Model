@@ -5,3 +5,14 @@ Current Focus: Data Capture Module
 - Developing the core module for real-time data acquisition from CARLA and an IR camera.
 - Ensuring multimodal compatibility, signal accuracy, and synchronized data pipelines for robust analysis.
 - Closely collaborating with signal processing and feature extraction teams to align input data for fatigue detection.
+
+
+## Getting Started
+ 
+Run this command to launch the ROS 2 data publisher:
+
+```bash
+cd ~/ros2_ws
+source install/setup.bash
+ros2 run data_capture data_publisher
+
