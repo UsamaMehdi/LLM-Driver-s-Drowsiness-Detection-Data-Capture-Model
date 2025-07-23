@@ -1,20 +1,42 @@
-### tcp_receiver.py (ROS 2 Version). A local server to test whether or not data is transfered.
-
 #!/usr/bin/env python3
+"""
+TCP Receiver & WebSocket Broadcaster for ROS 2 JSON Streaming
+
+This script listens for JSON-formatted messages sent over TCP (e.g. from a ROS 2 data publisher),
+then relays the messages in real-time to connected WebSocket clients for live visualization.
+
+- TCP Server: Receives JSON lines over port 5000
+- WebSocket Server: Broadcasts incoming JSON to web clients over port 6789
+
+Author: Usama Mehdi & Team  
+Project: LLM Driver Drowsiness Detection System – Data Capture Pipeline  
+"""
+
 import socket
 import json
 import asyncio
 import websockets
 import threading
 
+# TCP server settings (from ROS 2 data_publisher.py)
 TCP_HOST = '127.0.0.1'
 TCP_PORT = 5000
+
+# WebSocket server settings (for local viewer)
 WS_HOST = 'localhost'
 WS_PORT = 6789
 
+# Set to store all connected WebSocket clients
 connected_clients = set()
 
 async def websocket_handler(websocket, path):
+    """
+    Handles WebSocket client connections and disconnections.
+
+    Args:
+        websocket (WebSocketServerProtocol): The client WebSocket.
+        path (str): Request path (unused here).
+    """
     connected_clients.add(websocket)
     print(f"[WS] Client connected")
     try:
@@ -24,6 +46,9 @@ async def websocket_handler(websocket, path):
         print(f"[WS] Client disconnected")
 
 def start_websocket_server():
+    """
+    Starts the WebSocket server in its own thread with a new asyncio event loop.
+    """
     print(f"[INFO] Starting WebSocket server at ws://{WS_HOST}:{WS_PORT}")
     asyncio.set_event_loop(asyncio.new_event_loop())
     start_server = websockets.serve(websocket_handler, WS_HOST, WS_PORT)
@@ -31,13 +56,29 @@ def start_websocket_server():
     asyncio.get_event_loop().run_forever()
 
 def broadcast_to_websockets(message):
+    """
+    Launches an asynchronous broadcast of a message to all connected WebSocket clients.
+
+    Args:
+        message (str): JSON string to send.
+    """
     asyncio.run(broadcast_async(message))
 
 async def broadcast_async(message):
+    """
+    Asynchronous function to broadcast message to all WebSocket clients.
+
+    Args:
+        message (str): JSON string to send.
+    """
     if connected_clients:
         await asyncio.gather(*(client.send(message) for client in connected_clients))
 
 def start_tcp_server():
+    """
+    Starts a TCP server that listens for JSON-formatted messages,
+    prints them, and relays them to WebSocket clients.
+    """
     print(f"[INFO] Starting TCP Server at {TCP_HOST}:{TCP_PORT}")
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind((TCP_HOST, TCP_PORT))
@@ -66,5 +107,8 @@ def start_tcp_server():
                     break
 
 if __name__ == "__main__":
+    # Launch WebSocket server in a separate daemon thread
     threading.Thread(target=start_websocket_server, daemon=True).start()
+
+    # Start the TCP server to receive JSON lines from ROS 2 publisher
     start_tcp_server()
