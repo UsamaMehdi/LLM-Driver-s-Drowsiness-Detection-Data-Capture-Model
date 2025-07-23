@@ -1,6 +1,16 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+"""
+ROS 1 (Melodic) Carla Data Publisher
+
+This script connects to the CARLA simulator, retrieves the ego vehicle's location and steering angle,
+calculates the lateral offset from the lane center using the Waypoint API, and logs the data to a JSON file.
+
+Author: Usama Mehdi & Team
+Course: LLM Driver Drowsiness Detection System Project
+"""
+
 import rospy
 import carla
 import math
@@ -14,6 +24,15 @@ client.set_timeout(10.0)
 world = client.get_world()
 
 def get_signed_lateral_offset(vehicle_location):
+    """
+    Calculate the signed lateral offset of the vehicle from the lane center.
+
+    Args:
+        vehicle_location (carla.Location): The current location of the vehicle.
+
+    Returns:
+        tuple: A tuple containing the lane center (carla.Location) and the signed lateral offset (float).
+    """
     map = world.get_map()
     waypoint = map.get_waypoint(vehicle_location, project_to_road=True)
     lane_center = waypoint.transform.location
@@ -29,10 +48,10 @@ def get_signed_lateral_offset(vehicle_location):
     fx /= mag_f
     fy /= mag_f
 
-    # Cross product to determine direction
+    # Compute 2D cross product to determine the direction
     cross = fx * dy - fy * dx
 
-    # Distance (magnitude)
+    # Lateral distance magnitude
     distance = math.sqrt(dx**2 + dy**2)
 
     # Signed distance
@@ -40,6 +59,13 @@ def get_signed_lateral_offset(vehicle_location):
     return lane_center, signed_offset
 
 def save_data_to_json(data, filename="lane_log.json"):
+    """
+    Append the provided data to a JSON file.
+
+    Args:
+        data (dict): Dictionary containing vehicle and lane metrics.
+        filename (str): Target JSON file path (default: 'lane_log.json').
+    """
     if not os.path.exists(filename):
         with open(filename, "w") as f:
             json.dump([data], f, indent=4)
@@ -54,8 +80,11 @@ def save_data_to_json(data, filename="lane_log.json"):
             json.dump(existing, f, indent=4)
 
 def main():
+    """
+    Main ROS node loop. Logs lane and vehicle position data at 2 Hz.
+    """
     rospy.init_node("lane_offset_logger", anonymous=True)
-    rate = rospy.Rate(2)  # 2 Hz
+    rate = rospy.Rate(2)  # Logging frequency: 2 Hz
 
     try:
         vehicle = world.get_actors().filter("vehicle.*")[0]
@@ -73,8 +102,16 @@ def main():
         lane_center, lateral_offset = get_signed_lateral_offset(location)
 
         data = {
-            "vehicle_position": {"x": round(location.x, 4), "y": round(location.y, 4), "z": round(location.z, 2)},
-            "lane_center": {"x": round(lane_center.x, 4), "y": round(lane_center.y, 4), "z": round(lane_center.z, 2)},
+            "vehicle_position": {
+                "x": round(location.x, 4),
+                "y": round(location.y, 4),
+                "z": round(location.z, 2)
+            },
+            "lane_center": {
+                "x": round(lane_center.x, 4),
+                "y": round(lane_center.y, 4),
+                "z": round(lane_center.z, 2)
+            },
             "steering_angle": round(steering_angle, 4),
             "lateral_offset": round(lateral_offset, 4),
             "direction": "left" if lateral_offset > 0 else "right" if lateral_offset < 0 else "center"
