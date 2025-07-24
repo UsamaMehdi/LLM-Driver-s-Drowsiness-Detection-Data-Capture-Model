@@ -1,5 +1,6 @@
 # ROS2-Humble: Data Publisher Script
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
 """
 ROS 2 Node: data_publisher.py
