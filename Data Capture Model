@@ -2,7 +2,6 @@
 #!/usr/bin/env python3
 
 """
-ROS 2 Node: data_publisher.py
 
 This script connects to the CARLA simulator and collects live vehicle telemetry data
 including steering angle and lateral offset from the lane center. The data is processed
